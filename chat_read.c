@@ -8,7 +8,7 @@
 
 #define MAX_LEN 100
 
-int get_key(char* file_path){
+int getKey(char* file_path){
     FILE* fs;
     fs = fopen(file_path, "r");
     char str[MAX_LEN];
@@ -17,48 +17,38 @@ int get_key(char* file_path){
     return num;
 }
 
+void setShmAddr(int key, int size, void* shmAddr){
+    int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
+
+    if (shmId < 0)
+    {
+        shmId = shmget((key_t)key, size, 0666);
+        shmAddr = shmat(shmId, (void *)0, 0666);
+        if (shmAddr < 0)
+        {
+            perror("shmat attach is failed : ");
+            exit(0);
+        }
+    } else {
+        shmAddr = shmat(shmId, (void *)0, 0666);
+    }
+}
+
+
 int main(void)
 {
     int chatShmId, roomShmId;
     int shmbufindex, readmsgcount;
     CHAT_INFO *chatInfo = NULL;
     void *chatShmAddr = (void *)0;
-    int shm_key = get_key("key.txt");
-
-    chatShmId = shmget((key_t)shm_key, 10 * sizeof(CHAT_INFO),
-                       0666 | IPC_CREAT | IPC_EXCL);
-
-    if (chatShmId < 0)
-    {
-        chatShmId = shmget((key_t)shm_key, 10 * sizeof(CHAT_INFO),
-                           0666);
-        chatShmAddr = shmat(chatShmId, (void *)0, 0666);
-        if (chatShmAddr < 0)
-        {
-            perror("shmat attach is failed : ");
-            exit(0);
-        }
-    }
-    chatShmAddr = shmat(chatShmId, (void *)0, 0666);
-
     void *roomShmAddr = (void *)0;
+    int shmKey = getKey("chat_key.txt");
+    int roomKey = getKey("room_key.txt");
 
-    roomShmId = shmget((key_t)24561, sizeof(ROOM_INFO),
-                       0666 | IPC_CREAT | IPC_EXCL);
-
-    if (roomShmId < 0)
-    {
-        roomShmId = shmget((key_t)24561, sizeof(ROOM_INFO),
-                           0666);
-        roomShmAddr = shmat(roomShmId, (void *)0, 0666);
-        if (roomShmAddr < 0)
-        {
-            perror("shmat attach is failed : ");
-            exit(0);
-        }
-    }
-    roomShmAddr = shmat(roomShmId, (void *)0, 0666);
-
+    setShmAddr(shmKey, 10 * sizeof(CHAT_INFO), chatShmAddr);
+    setShmAddr(roomKey, sizeof(ROOM_INFO), roomShmAddr);
+    
+    
     initscr();
 
     WINDOW *OutputWnd = subwin(stdscr, 12, 42, 0, 0);
