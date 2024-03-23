@@ -56,20 +56,20 @@ int main(void)
 
     WINDOW *OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     WINDOW *InputWnd = subwin(stdscr, 3, 42, 13, 0);
-    WINDOW *UserWnd = subwin(stdscr, 5, 20, 0, 43);
+    WINDOW *UserWnd = subwin(stdscr, 10, 20, 0, 43);
+    WINDOW *AppWnd = subwin(stdscr, 6, 20, 10, 43);
 
     box(OutputWnd, 0, 0);
     box(InputWnd, 0, 0);
     box(UserWnd, 0, 0);
+    box(AppWnd, 0, 0);
 
     mvwprintw(OutputWnd, 0, 2, "Output");
     mvwprintw(InputWnd, 0, 2, "Input");
     mvwprintw(UserWnd, 0, 2, "User");
-
+    mvwprintw(AppWnd, 0, 2, "App name");
+    
     int i;
-
-    // printf("reached before inf loop\n");
-
     while (1)
     {
         refresh();
