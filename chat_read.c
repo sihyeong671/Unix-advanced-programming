@@ -8,32 +8,35 @@
 
 #define MAX_LEN 100
 
-int getKey(char* file_path){
-    FILE* fs;
+int getKey(char *file_path)
+{
+    FILE *fs;
     fs = fopen(file_path, "r");
     char str[MAX_LEN];
     fgets(str, MAX_LEN, fs);
-    int num = atio(str);
+    int num = atoi(str);
     return num;
 }
 
-void setShmAddr(int key, int size, void* shmAddr){
+void setShmAddr(int key, int size, void **shmAddr)
+{
     int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
 
     if (shmId < 0)
     {
         shmId = shmget((key_t)key, size, 0666);
-        shmAddr = shmat(shmId, (void *)0, 0666);
-        if (shmAddr < 0)
+        *shmAddr = shmat(shmId, (void *)0, 0666);
+        if (*shmAddr < 0)
         {
             perror("shmat attach is failed : ");
             exit(0);
         }
-    } else {
-        shmAddr = shmat(shmId, (void *)0, 0666);
+    }
+    else
+    {
+        *shmAddr = shmat(shmId, (void *)0, 0666);
     }
 }
-
 
 int main(void)
 {
@@ -45,10 +48,12 @@ int main(void)
     int shmKey = getKey("chat_key.txt");
     int roomKey = getKey("room_key.txt");
 
-    setShmAddr(shmKey, 10 * sizeof(CHAT_INFO), chatShmAddr);
-    setShmAddr(roomKey, sizeof(ROOM_INFO), roomShmAddr);
-    
-    
+    printf("here\n");
+
+    setShmAddr(shmKey, 10 * sizeof(CHAT_INFO), &chatShmAddr);
+    setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
+    printf("here\n");
+
     initscr();
 
     WINDOW *OutputWnd = subwin(stdscr, 12, 42, 0, 0);
