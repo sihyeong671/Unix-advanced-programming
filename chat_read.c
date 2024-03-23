@@ -48,11 +48,9 @@ int main(void)
     int shmKey = getKey("chat_key.txt");
     int roomKey = getKey("room_key.txt");
 
-    printf("here\n");
 
     setShmAddr(shmKey, 10 * sizeof(CHAT_INFO), &chatShmAddr);
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
-    printf("here\n");
 
     initscr();
 
