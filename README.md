@@ -6,6 +6,14 @@
 - [ ] makefile 만들기
 - [ ] 코드 최적화
 
+## How To use
+```sh
+gcc -o read chat_read.c -lncursesw
+gcc -o write chat_write.c -lncursesw
+
+# read 프로세스 한 개
+# write 프로세스 세 개
+```
 
 ## 참고 사항
 ```sh
