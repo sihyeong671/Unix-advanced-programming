@@ -7,12 +7,6 @@ typedef struct chatInfo
     char message[40];
 } CHAT_INFO;
 
-// typedef struct roomInfo
-// {
-//     char userIDs[3][20];
-//     int userCnt;
-// } ROOM_INFO;
-
 typedef struct roomInfo
 {
     int chatFlag;
