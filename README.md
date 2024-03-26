@@ -24,13 +24,15 @@ sudo apt-get install build-essential
 ```
 ### Run
 ```sh
+# 파일 컴파일
 make
 
 # open 4 terminal and run 1 read process, 3 write process
 ./read
 ./write
 
-# make clean
+# 실행 파일 삭제, 공유메모리 삭제
+make clean
 ```
 
 ## Simple Architecture & Screen Shot
