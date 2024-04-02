@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sys/shm.h>
 #include <ncursesw/curses.h>
@@ -21,12 +22,14 @@ void chatWrite();
 
 WINDOW *OutputWnd, *InputWnd, *UserWnd, *AppWnd;
 
+bool quit;
 int chatShmId, roomShmId;
 int shmbufindex, readmsgcount;
 CHAT_INFO *chatInfo = NULL;
 void *roomShmAddr = (void *)0;
 int roomKey;
 char userID[20];
+pthread_mutex_t mutex;
 
 
 void initWindow() {
@@ -54,6 +57,16 @@ void initWindow() {
     
 }
 
+int getKey(char *file_path)
+{
+    FILE *fs;
+    fs = fopen(file_path, "r");
+    char str[MAX_LEN];
+    fgets(str, MAX_LEN, fs);
+    int num = atoi(str);
+    return num;
+}
+
 void setShmAddr(int key, int size, void **shmAddr)
 {
     int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
@@ -77,9 +90,9 @@ void setShmAddr(int key, int size, void **shmAddr)
 void chatRead(){
     int i;
     int pre_cnt = 0;
-    while (1)
+    while (!quit)
     {
-
+        pthread_mutex_lock(&mutex);
         if (((ROOM_INFO *)roomShmAddr)->chatFlag > 0){
             ((ROOM_INFO *)roomShmAddr)->chatFlag--;
             wclear(OutputWnd);
@@ -121,14 +134,16 @@ void chatRead(){
             mvwprintw(UserWnd, 0, 2, "User");
         }
         wrefresh(UserWnd);
-
+        pthread_mutex_unlock(&mutex);
+        usleep(10000);   
     }
-    endwin();
 }
 
 
 void chatWrite(){
 
+    int i;
+    char inputstr[40];
     int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
     if (currentUserCnt < 3)
     {
@@ -139,17 +154,15 @@ void chatWrite(){
         exit(0);
     }
 
-    int i;
-    char inputstr[40];
-
     while (1)
     {
+        
         // TODO
         // 종료 조건 만들기
-        // 띄워쓰기 문제 해결
         // 
-        mvwscanw(InputWnd, 1, 1, "%s", inputstr);
-        if (!strcmp(inputstr, "quit")) {
+        mvwgetstr(InputWnd, 1, 1, inputstr);
+        pthread_mutex_lock(&mutex);
+        if (!strcmp(inputstr, "\\quit")) {
             int index = 0;
             for(i = 0; i < 3; i++) {
                 if (!strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], userID)) {
@@ -157,10 +170,11 @@ void chatWrite(){
                 }
             }
             for(i = index; i < 3; i++) {
-                memset(((ROOM_INFO *)roomShmAddr)->userIDs + i, 0, 20 * sizeof(char));
                 memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i+1), 20 * sizeof(char));
             }
             ((ROOM_INFO *)roomShmAddr)->userCnt--;
+            
+            quit = true;
             break;
         } 
         wrefresh(InputWnd);
@@ -168,10 +182,7 @@ void chatWrite(){
         for (i = 0; i < 9; i++)
         {
             // 왼쪽의 주소에 오른쪽 주소를 담음
-            memset(((ROOM_INFO *)roomShmAddr)->chats + (i), 0, sizeof(CHAT_INFO));
             memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i+1), sizeof(CHAT_INFO));
-            // memcpy(((ROOM_INFO *)roomShmAddr)->chats[i], ((ROOM_INFO *)roomShmAddr)->chats[i+1], sizeof(CHAT_INFO));
-            // memcpy
         }
         strcat(inputstr, "\0");
         strcpy(((ROOM_INFO *)roomShmAddr)->chats[9].message, inputstr);
@@ -181,6 +192,7 @@ void chatWrite(){
         wclear(InputWnd);
         box(InputWnd, 0, 0);
         mvwprintw(InputWnd, 0, 2, "Input");
+        pthread_mutex_unlock(&mutex);
     }
     endwin();
 }
@@ -193,17 +205,17 @@ int main(int argc, char *argv[]){
     }
     strcpy(userID, argv[1]);
 
-
     pthread_t tidRead, tidWrite;
     initWindow();
     roomKey = getKey("room_key.txt");
+    setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
 
-    
-    pthread_create(&tidRead, NULL, chatRead, NULL);
-    pthread_create(&tidWrite, NULL, chatWrite, NULL);
+    pthread_mutex_init(&mutex, NULL);
+    int readErr = pthread_create(&tidRead, NULL, (void*)chatRead, NULL);
+    int writeErr = pthread_create(&tidWrite, NULL, (void*)chatWrite, NULL);
 
-    ptherad_join(tidRead, NULL);
-    ptherad_join(tidWrite, NULL);
-
+    pthread_join(tidRead, NULL);
+    pthread_join(tidWrite, NULL);
+    pthread_mutex_destroy(&mutex);
     return 0;
 }
