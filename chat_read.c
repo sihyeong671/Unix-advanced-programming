@@ -18,25 +18,7 @@ int getKey(char *file_path)
     return num;
 }
 
-void setShmAddr(int key, int size, void **shmAddr)
-{
-    int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
 
-    if (shmId < 0)
-    {
-        shmId = shmget((key_t)key, size, 0666);
-        *shmAddr = shmat(shmId, (void *)0, 0666);
-        if (*shmAddr < 0)
-        {
-            perror("shmat attach is failed : ");
-            exit(0);
-        }
-    }
-    else
-    {
-        *shmAddr = shmat(shmId, (void *)0, 0666);
-    }
-}
 
 int main(void)
 {

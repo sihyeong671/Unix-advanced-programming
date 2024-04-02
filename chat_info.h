@@ -1,5 +1,5 @@
-#ifndef __CSECHAT_H__
-#define __CSECHAT_H__
+#ifndef __CHAT_INFO_H__
+#define __CHAT_INFO_H__
 
 typedef struct chatInfo
 {
@@ -7,11 +7,13 @@ typedef struct chatInfo
     char message[40];
 } CHAT_INFO;
 
-// typedef struct roomInfo
-// {
-//     char userIDs[3][20];
-//     int userCnt;
-// } ROOM_INFO;
+typedef struct whisperInfo
+{
+    int chatFlag;
+    char participant1[20];
+    char participant2[20];
+    CHAT_INFO chats[10];
+} WHISPER_INFO;
 
 typedef struct roomInfo
 {
