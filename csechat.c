@@ -1,13 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <sys/shm.h>
-#include <ncursesw/curses.h>
+#include <ncurses.h>
 
 #include "chat_info.h"
 
@@ -29,7 +28,7 @@ CHAT_INFO *chatInfo = NULL;
 void *roomShmAddr = (void *)0;
 int roomKey;
 char userID[20];
-pthread_mutex_t mutex;
+// pthread_mutex_t mutex;
 
 
 void initWindow() {
@@ -37,8 +36,6 @@ void initWindow() {
 
     // TODO
     // 위치 지정 변수 설정
-    // 아래 변수를 전역으로
-    //WINDOW *OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     InputWnd = subwin(stdscr, 3, 42, 13, 0);
     UserWnd = subwin(stdscr, 10, 20, 0, 43);
@@ -54,7 +51,6 @@ void initWindow() {
     mvwprintw(UserWnd, 0, 2, "User");
     mvwprintw(AppWnd, 0, 2, "App name");
     refresh();
-    
 }
 
 int getKey(char *file_path)
@@ -92,7 +88,7 @@ void chatRead(){
     int pre_cnt = 0;
     while (!quit)
     {
-        pthread_mutex_lock(&mutex);
+        // pthread_mutex_lock(&mutex);
         if (((ROOM_INFO *)roomShmAddr)->chatFlag > 0){
             ((ROOM_INFO *)roomShmAddr)->chatFlag--;
             wclear(OutputWnd);
@@ -134,8 +130,8 @@ void chatRead(){
             mvwprintw(UserWnd, 0, 2, "User");
         }
         wrefresh(UserWnd);
-        pthread_mutex_unlock(&mutex);
-        usleep(10000);   
+        // pthread_mutex_unlock(&mutex);
+        usleep(10000);
     }
 }
 
@@ -156,12 +152,8 @@ void chatWrite(){
 
     while (1)
     {
-        
-        // TODO
-        // 종료 조건 만들기
-        // 
+        // pthread_mutex_lock(&mutex);
         mvwgetstr(InputWnd, 1, 1, inputstr);
-        pthread_mutex_lock(&mutex);
         if (!strcmp(inputstr, "\\quit")) {
             int index = 0;
             for(i = 0; i < 3; i++) {
@@ -175,9 +167,10 @@ void chatWrite(){
             ((ROOM_INFO *)roomShmAddr)->userCnt--;
             
             quit = true;
+            // pthread_mutex_unlock(&mutex);
             break;
         } 
-        wrefresh(InputWnd);
+        // wrefresh(InputWnd);
 
         for (i = 0; i < 9; i++)
         {
@@ -192,7 +185,7 @@ void chatWrite(){
         wclear(InputWnd);
         box(InputWnd, 0, 0);
         mvwprintw(InputWnd, 0, 2, "Input");
-        pthread_mutex_unlock(&mutex);
+        // pthread_mutex_unlock(&mutex);
     }
     endwin();
 }
@@ -210,12 +203,12 @@ int main(int argc, char *argv[]){
     roomKey = getKey("room_key.txt");
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
 
-    pthread_mutex_init(&mutex, NULL);
+    // pthread_mutex_init(&mutex, NULL);
     int readErr = pthread_create(&tidRead, NULL, (void*)chatRead, NULL);
     int writeErr = pthread_create(&tidWrite, NULL, (void*)chatWrite, NULL);
 
     pthread_join(tidRead, NULL);
     pthread_join(tidWrite, NULL);
-    pthread_mutex_destroy(&mutex);
+    // pthread_mutex_destroy(&mutex);
     return 0;
 }

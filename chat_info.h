@@ -1,10 +1,12 @@
 #ifndef __CHAT_INFO_H__
 #define __CHAT_INFO_H__
+#include <pthread.h>
 
 typedef struct chatInfo
 {
     char userID[20];
     char message[40];
+    // time 추가
 } CHAT_INFO;
 
 typedef struct whisperInfo

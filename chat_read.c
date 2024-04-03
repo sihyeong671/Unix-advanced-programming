@@ -1,5 +1,5 @@
-// #include <ncurses.h>
-#include <ncursesw/curses.h> // -lncursesw
+#include <ncurses.h>
+// #include <ncursesw/curses.h> // -lncursesw
 #include "chat_info.h"
 #include <sys/shm.h>
 #include <stdlib.h>
