@@ -1,5 +1,5 @@
 CC = gcc# 컴파일러
-LDFLAGS=-lncursesw -lpthread# 라이브러리
+LDFLAGS=-lncurses -lpthread# 라이브러리
 
 all: chat # 생성할 실행파일
 

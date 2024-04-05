@@ -7,9 +7,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
-
 #include <sys/shm.h>
-#include <ncursesw/curses.h>
+#include <ncurses.h>
 
 #include "chat_info.h"
 
@@ -81,9 +80,6 @@ void setShmAddr(int key, int size, void **shmAddr)
             perror("shmat attach is failed : ");
             exit(0);
         }
-        // pthread_cond_init(&(((ROOM_INFO *)(*shmAddr))->c), NULL);
-
-        //((ROOM_INFO *)(*shmAddr))->c
     }
     else
     {
@@ -91,28 +87,32 @@ void setShmAddr(int key, int size, void **shmAddr)
     }
 }
 
+void login()
+{
+    int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
+    if (currentUserCnt < 3)
+    {
+        memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[currentUserCnt], userID, sizeof(userID));
+        ((ROOM_INFO *)roomShmAddr)->userCnt++;
+    }
+    else
+    {
+        perror("too much users in room");
+        exit(0);
+    }
+}
+
 void chatRead()
 {
-    int i;
-    int pre_cnt = 0;
     while (!quit)
     {
-        usleep(10000);
-
         pthread_mutex_lock(&mutex);
-        //  if (((ROOM_INFO *)roomShmAddr)->chatFlag == 0)
-        //  {
-        //      pthread_cond_wait(&(((ROOM_INFO *)(roomShmAddr))->c), &mutex);
-        //  }
-        // if (((ROOM_INFO *)roomShmAddr)->chatFlag > 0)
-        // {
-        //     ((ROOM_INFO *)roomShmAddr)->chatFlag--;
+
         wclear(OutputWnd);
         box(OutputWnd, 0, 0);
         mvwprintw(OutputWnd, 0, 2, "Output");
-        //}
 
-        for (i = 0; i < 10; i++)
+        for (int i = 0; i < 10; i++)
         {
             if ((strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].message, "")))
             {
@@ -127,7 +127,11 @@ void chatRead()
         }
         wrefresh(OutputWnd);
 
-        for (i = 0; i < ((ROOM_INFO *)roomShmAddr)->userCnt; i++)
+        wclear(UserWnd);
+        box(UserWnd, 0, 0);
+        mvwprintw(UserWnd, 0, 2, "User");
+
+        for (int i = 0; i < ((ROOM_INFO *)roomShmAddr)->userCnt; i++)
         {
             if ((strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], "")))
             {
@@ -139,107 +143,54 @@ void chatRead()
                     ((ROOM_INFO *)roomShmAddr)->userIDs[i]);
             }
         }
-        if (pre_cnt != ((ROOM_INFO *)roomShmAddr)->userCnt)
-        {
-            pre_cnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
-            wclear(UserWnd);
-            box(UserWnd, 0, 0);
-            mvwprintw(UserWnd, 0, 2, "User");
-        }
         wrefresh(UserWnd);
         pthread_mutex_unlock(&mutex);
+        sleep(0);
     }
 }
 
 void chatWrite()
 {
-    // int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    // fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
-    int i;
-    char inputstr[40];
-    int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
-    if (currentUserCnt < 3)
-    {
-        memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[currentUserCnt], userID, sizeof(userID));
-        ((ROOM_INFO *)roomShmAddr)->userCnt++;
-    }
-    else
-    {
-        perror("too much users in room");
-        exit(0);
-    }
-
-    // nodelay(InputWnd, TRUE);
-    // timeout(1000);
+    char inputStr[40];
     while (1)
     {
-
-        // TODO
-        // 종료 조건 만들기
-        //
-        usleep(10000);
         pthread_mutex_lock(&mutex);
+        mvwgetstr(InputWnd, 1, 1, inputStr);
 
-        wtimeout(InputWnd, 1000);
-        int ch = mvwgetch(InputWnd, 1, 1);
-        if (ch == ERR)
-        {
+        if (!strcmp(inputStr, "")) {
             pthread_mutex_unlock(&mutex);
+            sleep(0);
             continue;
         }
-        mvwgetstr(InputWnd, 1, 1, inputstr);
-
-        // int ch;
-        // int i = 0;
-
-        // while (i < 40)
-        // {
-        //     wtimeout(InputWnd, 3000);
-        //     ch = mvwgetch(InputWnd, 1, 1 + i);
-        //     if (ch == ERR)
-        //     {
-        //         pthread_mutex_unlock(&mutex);
-        //         continue;
-        //     }
-        //     inputstr[i] = ch;
-        //     i++;
-        //     if (ch == '\n')
-        //     {
-        //         break;
-        //     }
-
-        //     // wrefresh(InputWnd);
-        // }
-
-        if (!strcmp(inputstr, "\\quit"))
+        if (!strcmp(inputStr, "\\quit"))
         {
             int index = 0;
-            for (i = 0; i < 3; i++)
+            for (int i = 0; i < 3; i++)
             {
                 if (!strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], userID))
                 {
                     index = i;
                 }
             }
-            for (i = index; i < 3; i++)
+            for (int i = index; i < 3; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
             }
             ((ROOM_INFO *)roomShmAddr)->userCnt--;
-
+            pthread_mutex_unlock(&mutex);
             quit = true;
             break;
         }
         wrefresh(InputWnd);
 
-        for (i = 0; i < 9; i++)
+        for (int i = 0; i < 9; i++)
         {
             // 왼쪽의 주소에 오른쪽 주소를 담음
             memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
         }
-        strcat(inputstr, "\0");
-        strcpy(((ROOM_INFO *)roomShmAddr)->chats[9].message, inputstr);
+        strcat(inputStr, "\0");
+        strcpy(((ROOM_INFO *)roomShmAddr)->chats[9].message, inputStr);
         strcpy(((ROOM_INFO *)roomShmAddr)->chats[9].userID, userID);
         //((ROOM_INFO *)roomShmAddr)->chatFlag += ((ROOM_INFO *)roomShmAddr)->userCnt;
 
@@ -248,6 +199,7 @@ void chatWrite()
         box(InputWnd, 0, 0);
         mvwprintw(InputWnd, 0, 2, "Input");
         pthread_mutex_unlock(&mutex);
+        sleep(0);
     }
 }
 
@@ -260,10 +212,16 @@ int main(int argc, char *argv[])
     }
     strcpy(userID, argv[1]);
 
+    // int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    // fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+
     pthread_t tidRead, tidWrite;
     initWindow();
     roomKey = getKey("room_key.txt");
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
+    login();
+
+    wtimeout(InputWnd, 3000);
 
     pthread_mutex_init(&mutex, NULL);
     int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
