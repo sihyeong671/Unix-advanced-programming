@@ -211,22 +211,33 @@ void chatWrite()
         char *pch;
         pch = strtok(inputStr, " ");
         bool isWhisper = !strcmp(pch, "/stalk");
-        for (int i = 0; i < MAX_CAPACITY; i++)
-        {
-            // 왼쪽의 주소에 오른쪽 주소를 담음
-            memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
-        }
 
         if (isWhisper){
-            pch = strtok(NULL, " "); // receiverID
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].receiverID, pch);
-            pch = strtok(NULL, " "); // message
-            // TODO
-            // stalk id
-            // if (pch == NULL){
-            //     pch = "null";
-            // }
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].message, pch); // while loop 돌려서 해결
+            
+            char receiveID[20];
+            char msg[40];
+
+            int idx = 0;
+            while (pch != NULL){
+                if(idx == 0)
+                {
+                    pch = strtok(NULL, " "); 
+                    strcpy(pch, receiveID);
+                }
+                else
+                {
+                    pch = strtok(NULL, " ");
+                    strcat(msg, pch);
+                } 
+                idx++;
+            }
+            if (idx < 2){
+                pthread_mutex_unlock(&mutex);
+                sleep(0);
+                continue;
+            }
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].receiverID, receiveID);
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].message, msg);
         }
         else
         {
@@ -234,6 +245,13 @@ void chatWrite()
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].receiverID, "ALL");
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].message, inputStr);
         }
+
+        for (int i = 0; i < MAX_CAPACITY; i++)
+        {
+            // 왼쪽의 주소에 오른쪽 주소를 담음
+            memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
+        }
+        
         strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].senderID, userID);
         wrefresh(InputWnd);
 
