@@ -31,14 +31,22 @@ int roomKey;
 char userID[20];
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+char inputStr[40];
+char allMsg[40];
+char whisperMsg[40];
+char receiverID[20];
+char *pch;
+
 void initWindow()
 {
     initscr();
 
     OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     InputWnd = subwin(stdscr, 3, 42, 13, 0);
-    UserWnd = subwin(stdscr, 10, 20, 0, 43);
-    AppWnd = subwin(stdscr, 6, 20, 10, 43);
+    UserWnd = subwin(stdscr, 12, 20, 0, 43);
+    AppWnd = subwin(stdscr, 3, 20, 13, 43);
+
+    wtimeout(InputWnd, 3000);
 
     box(OutputWnd, 0, 0);
     box(InputWnd, 0, 0);
@@ -48,7 +56,8 @@ void initWindow()
     mvwprintw(OutputWnd, 0, 2, "Output");
     mvwprintw(InputWnd, 0, 2, "Input");
     mvwprintw(UserWnd, 0, 2, "User");
-    mvwprintw(AppWnd, 0, 2, "App name");
+    mvwprintw(AppWnd, 0, 2, "App");
+    mvwprintw(AppWnd, 1, 3, "Unix Chat App");
     refresh();
 }
 
@@ -97,6 +106,23 @@ void login()
     }
 }
 
+void logout()
+{
+    int index = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        if (!strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], userID))
+        {
+            index = i;
+        }
+    }
+    for (int i = index; i < 3; i++)
+    {
+        memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
+    }
+    ((ROOM_INFO *)roomShmAddr)->userCnt--;
+}
+
 void chatRead()
 {
     while (!quit)
@@ -110,8 +136,13 @@ void chatRead()
         int line = 10;
         for (int i = MAX_CAPACITY - 1; i >= 0; i--)
         {
-
-            if(!strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, "ALL"))
+            bool msgEmpty = !(strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].message, ""));
+            if (!msgEmpty)
+            {
+                bool isAllMsg = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, "ALL");
+                bool sendWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].senderID, userID);
+                bool receiveWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, userID);
+                if (isAllMsg)
                 {
                     mvwprintw(
                         OutputWnd,
@@ -121,19 +152,7 @@ void chatRead()
                         ((ROOM_INFO *)roomShmAddr)->chats[i].senderID,
                         ((ROOM_INFO *)roomShmAddr)->chats[i].message);
                 }
-            else if ((strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].message, "")))
-            {
-                if((!strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, userID))){
-                    mvwprintw(
-                        OutputWnd,
-                        line--,
-                        1,
-                        "[%s] >> [%s]: %s",
-                        ((ROOM_INFO *)roomShmAddr)->chats[i].senderID,
-                        ((ROOM_INFO *)roomShmAddr)->chats[i].receiverID,
-                        ((ROOM_INFO *)roomShmAddr)->chats[i].message);
-                }
-                else if(!strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].senderID, userID))
+                else if (sendWhisper || receiveWhisper)
                 {
                     mvwprintw(
                         OutputWnd,
@@ -145,7 +164,8 @@ void chatRead()
                         ((ROOM_INFO *)roomShmAddr)->chats[i].message);
                 }
             }
-            if (line == 0){
+            if (line == 0)
+            {
                 break;
             }
         }
@@ -175,90 +195,98 @@ void chatRead()
 
 void chatWrite()
 {
-
-    char inputStr[40];
     while (1)
     {
         pthread_mutex_lock(&mutex);
         mvwgetstr(InputWnd, 1, 1, inputStr);
 
-        if (!strcmp(inputStr, "")) {
+        bool isEmptyMsg = !strcmp(inputStr, "");
+        if (isEmptyMsg)
+        {
             pthread_mutex_unlock(&mutex);
             sleep(0);
             continue;
         }
-        
-        if (!strcmp(inputStr, "\\quit"))
+
+        bool isQuitMsg = !strcmp(inputStr, "/quit");
+        if (isQuitMsg)
         {
-            int index = 0;
-            for (int i = 0; i < 3; i++)
-            {
-                if (!strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], userID))
-                {
-                    index = i;
-                }
-            }
-            for (int i = index; i < 3; i++)
-            {
-                memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
-            }
-            ((ROOM_INFO *)roomShmAddr)->userCnt--;
+            logout();
             pthread_mutex_unlock(&mutex);
             quit = true;
             break;
         }
-        
-        char *pch;
+
+        strcpy(allMsg, inputStr);
+
+        // strtok은 동작 과정 중 inputStr의 space를 '\0'으로 변경시킴(귓속말이 아닐 때 그대로 inputStr을 출력할 경우 공백 이후의 문자가 출력되지 않음)
         pch = strtok(inputStr, " ");
+
         bool isWhisper = !strcmp(pch, "/stalk");
-
-        if (isWhisper){
-            
-            char receiveID[20];
-            char msg[40];
-
-            int idx = 0;
-            while (pch != NULL){
-                if(idx == 0)
-                {
-                    pch = strtok(NULL, " "); 
-                    strcpy(pch, receiveID);
-                }
-                else
-                {
-                    pch = strtok(NULL, " ");
-                    strcat(msg, pch);
-                } 
-                idx++;
+        if (isWhisper)
+        {
+            pch = strtok(NULL, " ");
+            if (pch != NULL)
+            {
+                strcpy(receiverID, pch);
             }
-            if (idx < 2){
+            else
+            {
+                wclear(InputWnd);
+                box(InputWnd, 0, 0);
+                mvwprintw(InputWnd, 0, 2, "Input");
+                wrefresh(InputWnd);
+
                 pthread_mutex_unlock(&mutex);
                 sleep(0);
                 continue;
             }
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].receiverID, receiveID);
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].message, msg);
+            pch = strtok(NULL, " ");
+            if (pch != NULL)
+            {
+                strcpy(whisperMsg, pch);
+            }
+            else
+            {
+                wclear(InputWnd);
+                box(InputWnd, 0, 0);
+                mvwprintw(InputWnd, 0, 2, "Input");
+                wrefresh(InputWnd);
+
+                pthread_mutex_unlock(&mutex);
+                sleep(0);
+                continue;
+            }
+            pch = strtok(NULL, " ");
+            while (pch != NULL)
+            {
+                strcat(whisperMsg, " ");
+                strcat(whisperMsg, pch);
+                pch = strtok(NULL, " ");
+            }
+            for (int i = 0; i < MAX_CAPACITY - 1; i++)
+            {
+                memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
+            }
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, receiverID);
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, whisperMsg);
         }
         else
         {
-            strcat(inputStr, "\0");
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].receiverID, "ALL");
-            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].message, inputStr);
+            for (int i = 0; i < MAX_CAPACITY - 1; i++)
+            {
+                memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
+            }
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, "ALL");
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, allMsg);
         }
+        strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
 
-        for (int i = 0; i < MAX_CAPACITY; i++)
-        {
-            // 왼쪽의 주소에 오른쪽 주소를 담음
-            memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
-        }
-        
-        strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY-1].senderID, userID);
-        wrefresh(InputWnd);
-
-        // 입력한 문자만 clear하기
         wclear(InputWnd);
         box(InputWnd, 0, 0);
         mvwprintw(InputWnd, 0, 2, "Input");
+        wrefresh(InputWnd);
+
         pthread_mutex_unlock(&mutex);
         sleep(0);
     }
@@ -268,21 +296,18 @@ int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        fprintf(stderr, "[Usage]: ./csechatwrite UserID \n");
+        fprintf(stderr, "[Usage]: ./csechat userID\n");
         exit(0);
     }
     strcpy(userID, argv[1]);
 
-
-    pthread_t tidRead, tidWrite;
     initWindow();
     roomKey = getKey("room_key.txt");
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
     login();
 
-    wtimeout(InputWnd, 3000);
-
     pthread_mutex_init(&mutex, NULL);
+    pthread_t tidRead, tidWrite;
     int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
     int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
 
