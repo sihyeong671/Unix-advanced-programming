@@ -28,12 +28,36 @@ make
 make clean
 ```
 
-## Simple Architecture & Screen Shot
+## Simple Architecture
 <p align=center>
-    <img src="./img/process_v2.png">
+    <img src="./img/v2/process_v2.png">
 </p>
+
+## Process Screen Shot
 <p align=center>
-    <img src="./img/screenshot_v2.png">
+    <b>1. make 명령어를 사용해 컴파일 실행</b>
+    <br>
+    <img src="./img/v2/s1.png">
+    <br>
+    <b>2. ./chat {userID} 커맨드를 사용해 채팅방 입장</b>
+    <br>
+    <img src="./img/v2/s2.png">
+    <br>
+    <b>3. 채팅을 치면 전체 유저에게 본인이 친 채팅이 출력</b>
+    <br>
+    <img src="./img/v2/s3.png">
+    <br>
+    <b>4. /stalk {userID} {msg} 커맨드로 특정 유저에게만 보이는 귓속말 전달</b>
+    <br>
+    <img src="./img/v2/s4.png">
+    <br>
+    <b>5. /quit 커맨드를 통해 채팅방에서 퇴장</b>
+    <br>
+    <img src="./img/v2/s5.png">
+    <br>
+    <b>6. make cleam 명령어로 실행파일, 채팅방 생성시 사용했던 공유메모리 삭제</b>
+    <br>
+    <img src="./img/v2/s6.png">
 </p>
 
 ## Code
@@ -427,6 +451,10 @@ int main(int argc, char *argv[])
     return 0;
 }
 ```
+
+### phtread_mutex_lock and unlock 사용 이유
+기본적으로 쓰레드로 분리된 함수가 각각 read, write이기 때문에 공유 메모리의 값을 동시에 바꿀 일은 없기에 쓰레드를 사용하지 않아도 됩니다. 그러나 사용하지 않는 경우 ncurses의 write쓰레드의 mvwgetstr와 read쓰레드의 다른 출력 함수가 동시 실행 되는 경우 화면에 쓰레기 값이 출력되는 것을 볼 수 있습니다. 이 때문에 pthread_mutex를 사용하였고 각각 while을 돌며 읽고 쓸 때 mutex_lock, mutex_unlock을 while의 시작과 끝에 사용해 주었습니다.(write의 경우는 쓰지 않는 경우를 생각하여 wtimeout을 적용했습니다.)
+
 
 ## 참고 사항
 공유 메모리는 malloc과 같기 때문에 할당하고 나서 해제를 해주어야 합니다.
