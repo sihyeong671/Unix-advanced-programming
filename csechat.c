@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/shm.h>
 #include <ncurses.h>
+#include <signal.h>
 
 #include "chat_info.h"
 
@@ -29,13 +30,15 @@ CHAT_INFO *chatInfo = NULL;
 void *roomShmAddr = (void *)0;
 int roomKey;
 char userID[20];
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+// pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 char inputStr[40];
 char allMsg[40];
 char whisperMsg[40];
 char receiverID[20];
 char *pch;
+
+pid_t readPid, writePid;
 
 void initWindow()
 {
@@ -134,7 +137,7 @@ void chatRead()
     {
         // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
-        pthread_mutex_lock(&mutex);
+        // pthread_mutex_lock(&mutex);
 
         wclear(OutputWnd);
         box(OutputWnd, 0, 0);
@@ -205,7 +208,7 @@ void chatRead()
         wrefresh(UserWnd);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
-        pthread_mutex_unlock(&mutex);
+        // pthread_mutex_unlock(&mutex);
         sleep(0);
     }
 }
@@ -216,14 +219,14 @@ void chatWrite()
     {
         // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
-        pthread_mutex_lock(&mutex);
+        // pthread_mutex_lock(&mutex);
         mvwgetstr(InputWnd, 1, 1, inputStr);
 
         // 공백이 입력되거나 타임아웃이 발생한 경우 read 쓰레드로 전환
         bool isEmptyMsg = !strcmp(inputStr, "");
         if (isEmptyMsg)
         {
-            pthread_mutex_unlock(&mutex);
+            // pthread_mutex_unlock(&mutex);
             sleep(0);
             continue;
         }
@@ -233,9 +236,11 @@ void chatWrite()
         if (isQuitMsg)
         {
             logout();
-            pthread_mutex_unlock(&mutex);
+            // pthread_mutex_unlock(&mutex);
             quit = true;
-            break;
+            // break;
+            kill(readPid, SIGKILL);
+            return;
         }
 
         // 귓속말 구현을 위해 strtok을 이용하여 공백을 기준으로 파싱
@@ -263,7 +268,7 @@ void chatWrite()
                 mvwprintw(InputWnd, 0, 2, "Input");
                 wrefresh(InputWnd);
 
-                pthread_mutex_unlock(&mutex);
+                // pthread_mutex_unlock(&mutex);
                 sleep(0);
                 continue;
             }
@@ -281,7 +286,7 @@ void chatWrite()
                 mvwprintw(InputWnd, 0, 2, "Input");
                 wrefresh(InputWnd);
 
-                pthread_mutex_unlock(&mutex);
+                // pthread_mutex_unlock(&mutex);
                 sleep(0);
                 continue;
             }
@@ -320,7 +325,7 @@ void chatWrite()
         wrefresh(InputWnd);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 read 쓰레드로 전환 보장
-        pthread_mutex_unlock(&mutex);
+        // pthread_mutex_unlock(&mutex);
         sleep(0);
     }
 }
@@ -341,15 +346,39 @@ int main(int argc, char *argv[])
     login();
 
     // ncurses의 멀티 쓰레드 환경에서 출력 오류 문제를 해결하기 위해 mutex 사용
-    pthread_mutex_init(&mutex, NULL);
-    pthread_t tidRead, tidWrite;
+    // pthread_mutex_init(&mutex, NULL);
+    // pthread_t tidRead, tidWrite;
 
-    int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
-    int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
+    // int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
+    // int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
+
+    readPid = fork();
+    if (readPid < 0){
+        printf("fork error");
+        exit(0);
+    }
+
+    // err check
+    if (readPid == 0){
+        chatRead();
+    }
+    
+    writePid = fork();
+    if (writePid < 0){
+        printf("fork error");
+        exit(0);
+    }
+
+    // err check
+    if (writePid == 0){
+        chatWrite();
+    }
+    
+
 
     // join을 이용하여 main보다 먼저 종료되지 않도록 보장
-    pthread_join(tidRead, NULL);
-    pthread_join(tidWrite, NULL);
+
+    wait(0);
 
     delwin(OutputWnd);
     delwin(InputWnd);
@@ -358,6 +387,6 @@ int main(int argc, char *argv[])
     endwin();
 
     // mutex 해제
-    pthread_mutex_destroy(&mutex);
+    // pthread_mutex_destroy(&mutex);
     return 0;
 }

@@ -9,7 +9,6 @@ typedef struct chatInfo
     char senderID[20];
     char receiverID[20];
     char message[40];
-    // time 추가
 } CHAT_INFO;
 
 typedef struct roomInfo
