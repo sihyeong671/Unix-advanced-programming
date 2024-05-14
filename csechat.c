@@ -10,6 +10,7 @@
 #include <sys/shm.h>
 #include <ncurses.h>
 #include <semaphore.h>
+#include <sys/wait.h>
 
 #include "chat_info.h"
 
@@ -39,6 +40,7 @@ char allMsg[40];
 char whisperMsg[40];
 char receiverID[20];
 char *pch;
+sem_t *sem;
 
 void initWindow()
 {
@@ -79,39 +81,58 @@ int getKey(char *file_path)
 void setShmAddr(int key, int size, void **shmAddr)
 {
     int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
-    // printf("shmID: %d\n", shmId);
 
-    if (shmId < 0)
+    if (shmId < 0) // 이미 방이 만들어진 경우
     {
         shmId = shmget((key_t)key, size, 0666);
         *shmAddr = shmat(shmId, (void *)0, 0666);
-        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", 0);
-
         if (*shmAddr < 0)
         {
             perror("shmat attach is failed : ");
             exit(0);
         }
+
+        sem = sem_open("/sem_key", 0, 0644); // 이미 생성된 세마포어 열기
+        if (sem == SEM_FAILED)
+        {
+            perror("sem_open: ");
+            exit(0);
+        }
+
         login();
     }
-    else
+    else // 새로 방을 만드는 경우
     {
         *shmAddr = shmat(shmId, (void *)0, 0666);
-        sem_unlink("/sem_key");
-        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", O_CREAT | O_EXCL, 0644, 1);
-        if (((ROOM_INFO *)roomShmAddr)->sem == SEM_FAILED)
+        if (*shmAddr < 0)
         {
-            perror("sem_open [pSem]: ");
+            perror("shmat attach is failed : ");
+            exit(0);
+        }
+
+        sem_unlink("/sem_key");
+        sem = sem_open("/sem_key", O_CREAT | O_EXCL, 0644, 1); // 세마포어 생성 후 열기
+        if (sem == SEM_FAILED)
+        {
+            perror("sem_open: ");
             exit(-1);
         }
+
         login();
+
         pid_t pid = fork();
         if (pid == 0)
         {
-            while (((ROOM_INFO *)roomShmAddr)->userCnt != 0)
-                ;
-            sem_unlink("/sem_key");
+            while (true)
+            {
+                sem_wait(sem);
+                if (((ROOM_INFO *)roomShmAddr)->userCnt == 0)
+                    break;
+                sem_post(sem);
+                sleep(0);
+            }
 
+            sem_unlink("/sem_key");
             shmctl(shmId, IPC_RMID, 0);
             exit(0);
         }
@@ -121,23 +142,26 @@ void setShmAddr(int key, int size, void **shmAddr)
 void login()
 {
     // 채팅방에는 3명까지만
-    const int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
-    if (currentUserCnt < 3)
+    sem_wait(sem);
+    if (((ROOM_INFO *)roomShmAddr)->userCnt < 3)
     {
         // 유저 ID를 채팅방에 추가
-        memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[currentUserCnt], userID, sizeof(userID));
+        memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[((ROOM_INFO *)roomShmAddr)->userCnt], userID, sizeof(userID));
         ((ROOM_INFO *)roomShmAddr)->userCnt++;
     }
+
     else
     {
         perror("too much users in room");
         exit(0);
     }
+    sem_post(sem);
 }
 
 void logout()
 {
     // 유저 ID를 채팅방에서 제거
+    sem_wait(sem);
     int index = 0;
     for (int i = 0; i < 3; i++)
     {
@@ -151,6 +175,7 @@ void logout()
         memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
     }
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
+    sem_post(sem);
     sem_unlink("/sem_key");
 }
 
@@ -168,6 +193,8 @@ void chatRead()
 
         // 10개까지만 출력
         int line = 10;
+
+        sem_wait(sem);
 
         for (int i = MAX_CAPACITY - 1; i >= 0; i--)
         {
@@ -235,6 +262,7 @@ void chatRead()
             "User cnt: %d",
             ((ROOM_INFO *)roomShmAddr)->userCnt);
         wrefresh(UserWnd);
+        sem_post(sem);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
         pthread_mutex_unlock(&mutex);
@@ -326,7 +354,7 @@ void chatWrite()
                 pch = strtok(NULL, " ");
             }
             // 새 귓속말을 공유 메모리에 전달
-            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
+            sem_wait(sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
@@ -334,12 +362,12 @@ void chatWrite()
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, receiverID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, whisperMsg);
-            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
+            sem_post(sem);
         }
         else
         {
             // 새 전체 메세지를 공유 메모리에 전달
-            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
+            sem_wait(sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
@@ -347,7 +375,7 @@ void chatWrite()
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, "ALL");
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, allMsg);
-            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
+            sem_post(sem);
         }
 
         wclear(InputWnd);
