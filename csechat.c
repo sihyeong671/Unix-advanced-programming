@@ -1,96 +1,3 @@
-# 유닉스 응용 프로그래밍
-[Github Link](https://github.com/sihyeong671/Unix-advanced-programming/tree/feat/chat_v2)
-
-## 팀 구성
-- [박시형](https://github.com/sihyeong671?tab=repositories)
-- [장인성](https://github.com/is-jang)
-
-
-## Env
-- **OS** : Windows 11. WSL2. Ubuntu 22.04 LTS
-
-## How To use
-
-### Install library
-```sh
-sudo apt-get update
-sudo apt-get install libncurses5-dev
-sudo apt-get install libncursesw5-dev
-sudo apt-get install build-essential
-```
-### Run
-```sh
-# 파일 컴파일
-make
-# open 3 terminal
-./chat <userID>
-# 실행 파일 삭제, 공유메모리 삭제
-make clean
-```
-
-## Simple Architecture
-<p align=center>
-    <img src="./img/v2/process_v2.png">
-</p>
-
-## Process Screen Shot
-<p align=center>
-    <b>1. make 명령어를 사용해 컴파일 실행</b>
-    <br>
-    <img src="./img/v2/s1.png">
-    <br>
-    <b>2. ./chat {userID} 커맨드를 사용해 채팅방 입장</b>
-    <br>
-    <img src="./img/v2/s2.png">
-    <br>
-    <b>3. 채팅을 치면 전체 유저에게 본인이 친 채팅이 출력</b>
-    <br>
-    <img src="./img/v2/s3.png">
-    <br>
-    <b>4. /stalk {userID} {msg} 커맨드로 특정 유저에게만 보이는 귓속말 전달</b>
-    <br>
-    <img src="./img/v2/s4.png">
-    <br>
-    <b>5. /quit 커맨드를 통해 채팅방에서 퇴장</b>
-    <br>
-    <img src="./img/v2/s5.png">
-    <br>
-    <b>6. make cleam 명령어로 실행파일, 채팅방 생성시 사용했던 공유메모리 삭제</b>
-    <br>
-    <img src="./img/v2/s6.png">
-</p>
-
-## Code
-**csechat.h**
-```c
-#ifndef __CHAT_INFO_H__
-#define __CHAT_INFO_H__
-
-// 채팅 최대 저장 용량
-#define MAX_CAPACITY 100
-
-// 메시지 구조체
-typedef struct chatInfo
-{
-    char senderID[20];
-    char receiverID[20];
-    char message[40];
-} CHAT_INFO;
-
-// 채팅방 구조체
-typedef struct roomInfo
-{
-    int chatFlag;
-    int userCnt;
-    char userIDs[3][20];
-    CHAT_INFO chats[MAX_CAPACITY];
-} ROOM_INFO;
-
-#endif
-```
-**csechat.c**
-```c
-// 라이브러리 불러오기
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -102,6 +9,7 @@ typedef struct roomInfo
 #include <fcntl.h>
 #include <sys/shm.h>
 #include <ncurses.h>
+#include <semaphore.h>
 
 #include "chat_info.h"
 
@@ -112,8 +20,9 @@ void initWindow();
 void setShmAddr(int key, int size, void **shmAddr);
 void chatRead();
 void chatWrite();
+void login();
+void logout();
 
-// 필요한 전역 변수 정의
 WINDOW *OutputWnd, *InputWnd, *UserWnd, *AppWnd;
 
 bool quit;
@@ -130,10 +39,7 @@ char allMsg[40];
 char whisperMsg[40];
 char receiverID[20];
 char *pch;
-```
 
-```c
-// 프로세스 시작시 윈도우 생성하는 함수
 void initWindow()
 {
     initscr();
@@ -143,6 +49,8 @@ void initWindow()
     UserWnd = subwin(stdscr, 12, 20, 0, 43);
     AppWnd = subwin(stdscr, 3, 20, 13, 43);
 
+    // mvwgetstr이 non-blocking 함수라 입력이 없을 시 write 쓰레드에서 멈추어 있음
+    // InputWnd에 timeout을 걸어 3초 간 입력이 없을 시 read 쓰레드로 전환
     wtimeout(InputWnd, 3000);
 
     box(OutputWnd, 0, 0);
@@ -157,10 +65,7 @@ void initWindow()
     mvwprintw(AppWnd, 1, 3, "Unix Chat App");
     refresh();
 }
-```
 
-```c
-// 공유메모리 키 불러오는 함수
 int getKey(char *file_path)
 {
     FILE *fs;
@@ -170,39 +75,57 @@ int getKey(char *file_path)
     int num = atoi(str);
     return num;
 }
-```
 
-```c
-// 공유 메모리에 접근하여 주소값을 설정하는 함수
 void setShmAddr(int key, int size, void **shmAddr)
 {
     int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
+    // printf("shmID: %d\n", shmId);
 
-    if (shmId < 0) // 이미 존재하는 경우
+    if (shmId < 0)
     {
         shmId = shmget((key_t)key, size, 0666);
         *shmAddr = shmat(shmId, (void *)0, 0666);
+        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", 0);
+
         if (*shmAddr < 0)
         {
             perror("shmat attach is failed : ");
             exit(0);
         }
+        login();
     }
-    else 
+    else
     {
         *shmAddr = shmat(shmId, (void *)0, 0666);
+        sem_unlink("/sem_key");
+        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", O_CREAT | O_EXCL, 0644, 1);
+        if (((ROOM_INFO *)roomShmAddr)->sem == SEM_FAILED)
+        {
+            perror("sem_open [pSem]: ");
+            exit(-1);
+        }
+        login();
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            while (((ROOM_INFO *)roomShmAddr)->userCnt != 0)
+                ;
+            sem_unlink("/sem_key");
+
+            shmctl(shmId, IPC_RMID, 0);
+            exit(0);
+        }
     }
 }
 
-```
-
-```c
-// 유저가 프로세스 시작(채팅 앱 입장)시 ROOM_INFO의 현재 유저 수를 늘리고, 유저 이름을 저장하는 함수
 void login()
 {
-    int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
+    // 채팅방에는 3명까지만
+    sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
+    const int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
     if (currentUserCnt < 3)
     {
+        // 유저 ID를 채팅방에 추가
         memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[currentUserCnt], userID, sizeof(userID));
         ((ROOM_INFO *)roomShmAddr)->userCnt++;
     }
@@ -211,14 +134,14 @@ void login()
         perror("too much users in room");
         exit(0);
     }
+    sem_post(((ROOM_INFO *)roomShmAddr)->sem);
 }
-```
-```c
-// 프로세스 종료(채팅 앱 퇴장)시 
+
 void logout()
 {
+    // 유저 ID를 채팅방에서 제거
+    sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
     int index = 0;
-    // 현재 사용자의 인덱스를 구한다
     for (int i = 0; i < 3; i++)
     {
         if (!strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], userID))
@@ -226,37 +149,41 @@ void logout()
             index = i;
         }
     }
-    // 사용자를 제거하고 남은 사용자들의 인덱스를 앞으로 옮긴다
     for (int i = index; i < 3; i++)
     {
         memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
     }
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
+    sem_post(((ROOM_INFO *)roomShmAddr)->sem);
+    sem_unlink("/sem_key");
 }
-```
-```c
-// 공유메모리에 존재하는 채팅 내용 읽는 함수
+
 void chatRead()
 {
     while (!quit)
     {
+        // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
+        // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
         pthread_mutex_lock(&mutex);
-        // 읽기와 쓰기시 쓰레기 값이 출력되는 문제 때문에 mutext lock을 한다(추후 세마포어를 사용하여 프로세스간 충돌도 해결하도록 수정이 필요)
 
         wclear(OutputWnd);
         box(OutputWnd, 0, 0);
         mvwprintw(OutputWnd, 0, 2, "Output");
 
-        
-        int line = 10; // 최대 10개의 메시지만 출력
-        for (int i = MAX_CAPACITY - 1; i >= 0; i--) // 모든 for문을 검사
+        // 10개까지만 출력
+        int line = 10;
+
+        for (int i = MAX_CAPACITY - 1; i >= 0; i--)
         {
             bool msgEmpty = !(strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].message, ""));
+            // 빈 메세지가 아닌 경우 출력
             if (!msgEmpty)
             {
                 bool isAllMsg = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, "ALL");
                 bool sendWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].senderID, userID);
                 bool receiveWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, userID);
+
+                // 전체 메세지 출력
                 if (isAllMsg)
                 {
                     mvwprintw(
@@ -267,6 +194,8 @@ void chatRead()
                         ((ROOM_INFO *)roomShmAddr)->chats[i].senderID,
                         ((ROOM_INFO *)roomShmAddr)->chats[i].message);
                 }
+
+                // 귓속말 출력
                 else if (sendWhisper || receiveWhisper)
                 {
                     mvwprintw(
@@ -279,7 +208,7 @@ void chatRead()
                         ((ROOM_INFO *)roomShmAddr)->chats[i].message);
                 }
             }
-            if (line == 0) // 10개 모두 출력시 for문 탈출
+            if (line == 0)
             {
                 break;
             }
@@ -290,35 +219,43 @@ void chatRead()
         box(UserWnd, 0, 0);
         mvwprintw(UserWnd, 0, 2, "User");
 
-        // 유저 창에 본인 ID 출력
+        // 접속한 유저 출력
         for (int i = 0; i < ((ROOM_INFO *)roomShmAddr)->userCnt; i++)
         {
             if ((strcmp(((ROOM_INFO *)roomShmAddr)->userIDs[i], "")))
             {
                 mvwprintw(
                     UserWnd,
-                    i + 1,
+                    i + 2,
                     1,
                     "%s",
                     ((ROOM_INFO *)roomShmAddr)->userIDs[i]);
             }
         }
+        mvwprintw(
+            UserWnd,
+            1,
+            1,
+            "User cnt: %d",
+            ((ROOM_INFO *)roomShmAddr)->userCnt);
         wrefresh(UserWnd);
-        pthread_mutex_unlock(&mutex); // mutex unlock
-        sleep(0); // 우선 순위를 다른 쓰레드로 넘기기위한 sleep(0) 사용
+
+        // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
+        pthread_mutex_unlock(&mutex);
+        sleep(0);
     }
 }
-```
-```c
-// 공유메모리에 채팅 내용 쓰는 함수
+
 void chatWrite()
 {
     while (1)
     {
+        // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
+        // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
         pthread_mutex_lock(&mutex);
-        mvwgetstr(InputWnd, 1, 1, inputStr); // 유저 입력
+        mvwgetstr(InputWnd, 1, 1, inputStr);
 
-         // 입력이 비었는지 검사
+        // 공백이 입력되거나 타임아웃이 발생한 경우 read 쓰레드로 전환
         bool isEmptyMsg = !strcmp(inputStr, "");
         if (isEmptyMsg)
         {
@@ -327,9 +264,9 @@ void chatWrite()
             continue;
         }
 
-        // 탈출명령어인지 검사
+        // 사용자가 /quit을 입력한 경우 종료
         bool isQuitMsg = !strcmp(inputStr, "/quit");
-        if (isQuitMsg) 
+        if (isQuitMsg)
         {
             logout();
             pthread_mutex_unlock(&mutex);
@@ -337,37 +274,24 @@ void chatWrite()
             break;
         }
 
+        // 귓속말 구현을 위해 strtok을 이용하여 공백을 기준으로 파싱
+        // strtok은 동작 과정 중 inputStr의 space를 '\0'으로 변경시킴
+        // 즉, 귓속말이 아닐 때 그대로 inputStr을 출력할 경우 공백 이후의 문자가 출력되지 않음
+        // 이를 해결하기 위해 전체 메세지는 귓속말 구현을 위한 strtok을 사용하기 이전의 inputStr을 복사하여 사용
         strcpy(allMsg, inputStr);
 
-        // strtok은 동작 과정 중 inputStr의 space를 '\0'으로 변경시킴(귓속말이 아닐 때 그대로 inputStr을 출력할 경우 공백 이후의 문자가 출력되지 않음)
         pch = strtok(inputStr, " ");
-        // 귓속말인 경우 진입점
         bool isWhisper = !strcmp(pch, "/stalk");
+        // 귓속말인 경우
         if (isWhisper)
         {
-            // /stalk이후 첫번째 문자 검사 
             pch = strtok(NULL, " ");
+            // 귓속말 수신자를 받아옴
             if (pch != NULL)
             {
-                strcpy(receiverID, pch); // 첫번째 문자열 존재하는 경우(NULL이 아닌 경우) receiverID에 pch 복사
+                strcpy(receiverID, pch);
             }
-            else
-            {
-                // 명령어가 제대로 입력되지 않는 경우 입력 지움
-                wclear(InputWnd);
-                box(InputWnd, 0, 0);
-                mvwprintw(InputWnd, 0, 2, "Input");
-                wrefresh(InputWnd);
-
-                pthread_mutex_unlock(&mutex);
-                sleep(0);
-                continue;
-            }
-            pch = strtok(NULL, " ");
-            if (pch != NULL)
-            {
-                strcpy(whisperMsg, pch); // 두번째 문자열 존재하는 경우 whisperMsg에 copy
-            }
+            // 수신자가 명시되지 않은 경우 read 쓰레드로 전환
             else
             {
                 wclear(InputWnd);
@@ -379,65 +303,91 @@ void chatWrite()
                 sleep(0);
                 continue;
             }
+            // 메세지를 받아옴
             pch = strtok(NULL, " ");
-            while (pch != NULL) // ID 이후는 모두 whisperMsg이므로 while loop를 통해 모든 메시지를 whisperMsg에 담는다
+            if (pch != NULL)
+            {
+                strcpy(whisperMsg, pch);
+            }
+            // 메세지가 없는 경우 read 쓰레드로 전환
+            else
+            {
+                wclear(InputWnd);
+                box(InputWnd, 0, 0);
+                mvwprintw(InputWnd, 0, 2, "Input");
+                wrefresh(InputWnd);
+
+                pthread_mutex_unlock(&mutex);
+                sleep(0);
+                continue;
+            }
+            // 공백 기준으로 파싱된 메세지를 다시 합쳐줌
+            pch = strtok(NULL, " ");
+            while (pch != NULL)
             {
                 strcat(whisperMsg, " ");
                 strcat(whisperMsg, pch);
                 pch = strtok(NULL, " ");
             }
-            // 최신 메시지를 가장 마지막 array에 담기위해 메시지를 앞으로 한 인덱스 옮긴다.
+            // 새 귓속말을 공유 메모리에 전달
+            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
             }
-            // 마지막 인덱스에 receiverID, whisperMsg를 담는다.
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, receiverID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, whisperMsg);
+            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
         }
-        else // 귓속말이 아닌 경우 이전 메시지는 인덱스를 한칸씩 앞으로 옮기고 inputStr을 마지막 인덱스에 담는다.
+        else
         {
+            // 새 전체 메세지를 공유 메모리에 전달
+            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
             }
+            strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, "ALL");
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, allMsg);
+            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
         }
-        strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
 
         wclear(InputWnd);
         box(InputWnd, 0, 0);
         mvwprintw(InputWnd, 0, 2, "Input");
         wrefresh(InputWnd);
 
+        // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 read 쓰레드로 전환 보장
         pthread_mutex_unlock(&mutex);
         sleep(0);
     }
 }
-```
-```c
 
 int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        fprintf(stderr, "[Usage]: ./csechat userID\n");
+        fprintf(stderr, "[Usage]: ./chat userID\n");
         exit(0);
     }
     strcpy(userID, argv[1]);
 
     initWindow();
+    // 키 값을 파일로부터 읽어와 공유 메모리 설정
     roomKey = getKey("room_key.txt");
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
-    login();
+    // login();
 
+    // ncurses의 멀티 쓰레드 환경에서 출력 오류 문제를 해결하기 위해 mutex 사용
     pthread_mutex_init(&mutex, NULL);
     pthread_t tidRead, tidWrite;
+
     int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
     int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
 
-    // join을 이용해 메인 쓰레드가 먼저 종료되지 않도록 보장
+    // join을 이용하여 main이 먼저 종료되지 않도록 보장
     pthread_join(tidRead, NULL);
     pthread_join(tidWrite, NULL);
 
@@ -446,24 +396,9 @@ int main(int argc, char *argv[])
     delwin(UserWnd);
     delwin(AppWnd);
     endwin();
+
     // mutex 해제
     pthread_mutex_destroy(&mutex);
+    wait(0);
     return 0;
 }
-```
-
-### phtread_mutex_lock and unlock 사용 이유
-기본적으로 쓰레드로 분리된 함수가 각각 read, write이기 때문에 공유 메모리의 값을 동시에 바꿀 일은 없기에 쓰레드를 사용하지 않아도 됩니다. 그러나 사용하지 않는 경우 ncurses의 write쓰레드의 mvwgetstr와 read쓰레드의 다른 출력 함수가 동시 실행 되는 경우 화면에 쓰레기 값이 출력되는 것을 볼 수 있습니다. 이 때문에 pthread_mutex를 사용하였고 각각 while을 돌며 읽고 쓸 때 mutex_lock, mutex_unlock을 while의 시작과 끝에 사용해 주었습니다.(write의 경우는 쓰지 않는 경우를 생각하여 wtimeout을 적용했습니다.)
-
-
-## 참고 사항
-공유 메모리는 malloc과 같기 때문에 할당하고 나서 해제를 해주어야 합니다.
-
-```sh
-ipcs # 공유 메모리 세그먼트 확인
-ipcrm -m $(shmid) # 공유메모리 삭제
-```
-
-```sh
-kill -9 $(pid) # 프로세스 kill
-```
