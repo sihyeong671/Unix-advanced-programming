@@ -5,7 +5,6 @@
 
 #define MAX_CAPACITY 100
 
-
 typedef struct chatInfo
 {
     char senderID[20];
@@ -20,7 +19,7 @@ typedef struct roomInfo
     int userCnt;
     char userIDs[3][20];
     CHAT_INFO chats[MAX_CAPACITY];
-    sem_t *sem;
+    // sem_t *sem;
 } ROOM_INFO;
 
 #endif
