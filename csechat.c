@@ -48,7 +48,7 @@ void initWindow()
 
     // mvwgetstr이 non-blocking 함수라 입력이 없을 시 write 쓰레드에서 멈추어 있음
     // InputWnd에 timeout을 걸어 3초 간 입력이 없을 시 read 쓰레드로 전환
-    wtimeout(InputWnd, 3000);
+    // wtimeout(InputWnd, 3000);
 
     box(OutputWnd, 0, 0);
     box(InputWnd, 0, 0);
@@ -128,13 +128,18 @@ void logout()
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
 }
 
+
+// 텍스트 수정시에만 세마포어 mutex설정 mutex는 쓰레드가 아닌 각 프로세스마다 있어야 할 듯
+// 그래서 이걸 named 세마포어로 구현해야하는 것 같음
+// Read는 자고있다가 변경 생기면 깨워서 출력하도록 해야함
+// 
 void chatRead()
 {
     while (!quit)
     {
         // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
-        pthread_mutex_lock(&mutex);
+        // pthread_mutex_lock(&mutex);
 
         wclear(OutputWnd);
         box(OutputWnd, 0, 0);
@@ -202,11 +207,11 @@ void chatRead()
                     ((ROOM_INFO *)roomShmAddr)->userIDs[i]);
             }
         }
-        wrefresh(UserWnd);
+        wrefresh(UserWnd); // 최종출력하고 커서가 userwnd로 이동한다.
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
-        pthread_mutex_unlock(&mutex);
-        sleep(0);
+        // pthread_mutex_unlock(&mutex);
+        sleep(2);
     }
 }
 
@@ -216,15 +221,15 @@ void chatWrite()
     {
         // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
-        pthread_mutex_lock(&mutex);
+        // pthread_mutex_lock(&mutex);
         mvwgetstr(InputWnd, 1, 1, inputStr);
 
         // 공백이 입력되거나 타임아웃이 발생한 경우 read 쓰레드로 전환
         bool isEmptyMsg = !strcmp(inputStr, "");
         if (isEmptyMsg)
         {
-            pthread_mutex_unlock(&mutex);
-            sleep(0);
+            // pthread_mutex_unlock(&mutex);
+            // sleep(0);
             continue;
         }
 
@@ -233,8 +238,8 @@ void chatWrite()
         if (isQuitMsg)
         {
             logout();
-            pthread_mutex_unlock(&mutex);
-            quit = true;
+            // pthread_mutex_unlock(&mutex);
+            // quit = true;
             break;
         }
 
@@ -263,8 +268,8 @@ void chatWrite()
                 mvwprintw(InputWnd, 0, 2, "Input");
                 wrefresh(InputWnd);
 
-                pthread_mutex_unlock(&mutex);
-                sleep(0);
+                // pthread_mutex_unlock(&mutex);
+                // sleep(0);
                 continue;
             }
             // 메세지를 받아옴
@@ -281,8 +286,8 @@ void chatWrite()
                 mvwprintw(InputWnd, 0, 2, "Input");
                 wrefresh(InputWnd);
 
-                pthread_mutex_unlock(&mutex);
-                sleep(0);
+                // pthread_mutex_unlock(&mutex);
+                // sleep(0);
                 continue;
             }
             // 공백 기준으로 파싱된 메세지를 다시 합쳐줌
@@ -320,8 +325,8 @@ void chatWrite()
         wrefresh(InputWnd);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 read 쓰레드로 전환 보장
-        pthread_mutex_unlock(&mutex);
-        sleep(0);
+        // pthread_mutex_unlock(&mutex);
+        // sleep(0);
     }
 }
 
@@ -358,6 +363,6 @@ int main(int argc, char *argv[])
     endwin();
 
     // mutex 해제
-    pthread_mutex_destroy(&mutex);
+    // pthread_mutex_destroy(&mutex);
     return 0;
 }
