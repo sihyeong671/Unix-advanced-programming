@@ -123,11 +123,15 @@ void setShmAddr(int key, int size, void **shmAddr)
         pid_t pid = fork();
         if (pid == 0)
         {
+            // sem = sem_open("/sem_key", 0, 0644);
             while (true)
             {
                 sem_wait(sem);
                 if (((ROOM_INFO *)roomShmAddr)->userCnt == 0)
+                {
+                    sem_post(sem);
                     break;
+                }
                 sem_post(sem);
                 sleep(0);
             }
@@ -176,7 +180,7 @@ void logout()
     }
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
     sem_post(sem);
-    sem_unlink("/sem_key");
+    // sem_unlink("/sem_key");
 }
 
 void chatRead()
@@ -293,8 +297,9 @@ void chatWrite()
         if (isQuitMsg)
         {
             logout();
-            pthread_mutex_unlock(&mutex);
             quit = true;
+            pthread_mutex_unlock(&mutex);
+
             break;
         }
 
