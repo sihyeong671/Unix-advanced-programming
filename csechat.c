@@ -79,10 +79,8 @@ void initWindow()
     UserWnd = subwin(stdscr, 12, 20, 0, 43);
     AppWnd = subwin(stdscr, 3, 20, 13, 43);
 
-    // mvwgetstr이 non-blocking 함수라 입력이 없을 시 write 쓰레드에서 멈추어 있음
     // InputWnd에 timeout을 걸어 3초 간 입력이 없을 시 read 쓰레드로 전환
     wtimeout(InputWnd, 3000);
-    timeout(3000);
 
     box(OutputWnd, 0, 0);
     box(InputWnd, 0, 0);
@@ -153,16 +151,13 @@ void setShmAddr(int key, int size, void **shmAddr)
         if (pid == 0)
         {
             signal(SIGINT, server_handler);
-            // sem = sem_open("/sem_key", 0, 0644);
             while (true)
             {
-                sem_wait(sem);
                 if (((ROOM_INFO *)roomShmAddr)->userCnt == 0)
                 {
                     sem_post(sem);
                     break;
                 }
-                sem_post(sem);
                 sleep(0);
             }
 
@@ -210,7 +205,6 @@ void logout()
     }
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
     sem_post(sem);
-    // sem_unlink("/sem_key");
 }
 
 void chatRead()
@@ -227,8 +221,6 @@ void chatRead()
 
         // 10개까지만 출력
         int line = 10;
-
-        sem_wait(sem);
 
         for (int i = MAX_CAPACITY - 1; i >= 0; i--)
         {
@@ -296,7 +288,6 @@ void chatRead()
             "User cnt: %d",
             ((ROOM_INFO *)roomShmAddr)->userCnt);
         wrefresh(UserWnd);
-        sem_post(sem);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
         pthread_mutex_unlock(&mutex);
@@ -312,9 +303,7 @@ void chatWrite()
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
         pthread_mutex_lock(&mutex);
 
-        // mvwgetstr(InputWnd, 1, 1, inputStr);
         int ch, i = 0;
-        // while ((ch = getch()) != ERR)
         while ((ch = mvwgetch(InputWnd, 1, i + 1)) != ERR)
         {
             if (ch == '\n' || ch == '\r')
