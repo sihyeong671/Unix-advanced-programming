@@ -95,16 +95,6 @@ void initWindow()
     refresh();
 }
 
-int getKey(char *file_path)
-{
-    FILE *fs;
-    fs = fopen(file_path, "r");
-    char str[MAX_LEN];
-    fgets(str, MAX_LEN, fs);
-    int num = atoi(str);
-    return num;
-}
-
 void setShmAddr(int key, int size, void **shmAddr)
 {
     shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
@@ -439,8 +429,7 @@ int main(int argc, char *argv[])
 
     initWindow();
     // 키 값을 파일로부터 읽어와 공유 메모리 설정
-    roomKey = getKey("room_key.txt");
-    setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
+    setShmAddr(201924561, sizeof(ROOM_INFO), &roomShmAddr);
     // login();
 
     // ncurses의 멀티 쓰레드 환경에서 출력 오류 문제를 해결하기 위해 mutex 사용
