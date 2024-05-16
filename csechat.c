@@ -11,6 +11,8 @@
 #include <ncurses.h>
 #include <semaphore.h>
 #include <sys/wait.h>
+#include <termios.h>
+#include <signal.h>
 
 #include "chat_info.h"
 
@@ -41,10 +43,36 @@ char whisperMsg[40];
 char receiverID[20];
 char *pch;
 sem_t *sem;
+pthread_t tidRead, tidWrite;
+int shmId;
+
+void client_handler(int sig)
+{
+    quit = true;
+    logout();
+    pthread_join(tidRead, NULL);
+    pthread_join(tidWrite, NULL);
+    delwin(OutputWnd);
+    delwin(InputWnd);
+    delwin(UserWnd);
+    delwin(AppWnd);
+    endwin();
+    pthread_mutex_destroy(&mutex);
+    sem_unlink("/sem_key");
+    wait(0);
+    exit(0);
+}
+
+void server_handler(int sig)
+{
+    return;
+}
 
 void initWindow()
 {
     initscr();
+    keypad(stdscr, true);
+    signal(SIGINT, client_handler);
 
     OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     InputWnd = subwin(stdscr, 3, 42, 13, 0);
@@ -54,6 +82,7 @@ void initWindow()
     // mvwgetstr이 non-blocking 함수라 입력이 없을 시 write 쓰레드에서 멈추어 있음
     // InputWnd에 timeout을 걸어 3초 간 입력이 없을 시 read 쓰레드로 전환
     wtimeout(InputWnd, 3000);
+    timeout(3000);
 
     box(OutputWnd, 0, 0);
     box(InputWnd, 0, 0);
@@ -80,7 +109,7 @@ int getKey(char *file_path)
 
 void setShmAddr(int key, int size, void **shmAddr)
 {
-    int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
+    shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
 
     if (shmId < 0) // 이미 방이 만들어진 경우
     {
@@ -123,6 +152,7 @@ void setShmAddr(int key, int size, void **shmAddr)
         pid_t pid = fork();
         if (pid == 0)
         {
+            signal(SIGINT, server_handler);
             // sem = sem_open("/sem_key", 0, 0644);
             while (true)
             {
@@ -276,12 +306,27 @@ void chatRead()
 
 void chatWrite()
 {
-    while (1)
+    while (!quit)
     {
         // ncurses가 멀티 쓰레드 환경에서 동작하는 경우 출력이 깨져보이는 문제 발생
         // 이를 해결하기 위해 mutex를 이용하여 한 시점에서 하나의 ncurses가 동작하도록 보장
         pthread_mutex_lock(&mutex);
-        mvwgetstr(InputWnd, 1, 1, inputStr);
+
+        // mvwgetstr(InputWnd, 1, 1, inputStr);
+        int ch, i = 0;
+        // while ((ch = getch()) != ERR)
+        while ((ch = mvwgetch(InputWnd, 1, i + 1)) != ERR)
+        {
+            if (ch == '\n' || ch == '\r')
+            {
+                break;
+            }
+            else if (i < sizeof(inputStr) - 1)
+            {
+                inputStr[i++] = ch;
+            }
+        }
+        inputStr[i] = '\0';
 
         // 공백이 입력되거나 타임아웃이 발생한 경우 read 쓰레드로 전환
         bool isEmptyMsg = !strcmp(inputStr, "");
@@ -411,7 +456,6 @@ int main(int argc, char *argv[])
 
     // ncurses의 멀티 쓰레드 환경에서 출력 오류 문제를 해결하기 위해 mutex 사용
     pthread_mutex_init(&mutex, NULL);
-    pthread_t tidRead, tidWrite;
 
     int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
     int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
