@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/shm.h>
 #include <ncurses.h>
+#include <semaphore.h>
 
 #include "chat_info.h"
 
@@ -19,6 +20,8 @@ void initWindow();
 void setShmAddr(int key, int size, void **shmAddr);
 void chatRead();
 void chatWrite();
+void login();
+void logout();
 
 WINDOW *OutputWnd, *InputWnd, *UserWnd, *AppWnd;
 
@@ -76,27 +79,50 @@ int getKey(char *file_path)
 void setShmAddr(int key, int size, void **shmAddr)
 {
     int shmId = shmget((key_t)key, size, 0666 | IPC_CREAT | IPC_EXCL);
+    // printf("shmID: %d\n", shmId);
 
     if (shmId < 0)
     {
         shmId = shmget((key_t)key, size, 0666);
         *shmAddr = shmat(shmId, (void *)0, 0666);
+        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", 0);
+
         if (*shmAddr < 0)
         {
             perror("shmat attach is failed : ");
             exit(0);
         }
+        login();
     }
     else
     {
         *shmAddr = shmat(shmId, (void *)0, 0666);
+        sem_unlink("/sem_key");
+        ((ROOM_INFO *)roomShmAddr)->sem = sem_open("/sem_key", O_CREAT | O_EXCL, 0644, 1);
+        if (((ROOM_INFO *)roomShmAddr)->sem == SEM_FAILED)
+        {
+            perror("sem_open [pSem]: ");
+            exit(-1);
+        }
+        login();
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            while (((ROOM_INFO *)roomShmAddr)->userCnt != 0)
+                ;
+            sem_unlink("/sem_key");
+
+            shmctl(shmId, IPC_RMID, 0);
+            exit(0);
+        }
     }
 }
 
 void login()
 {
     // 채팅방에는 3명까지만
-    int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
+    sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
+    const int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
     if (currentUserCnt < 3)
     {
         // 유저 ID를 채팅방에 추가
@@ -108,11 +134,13 @@ void login()
         perror("too much users in room");
         exit(0);
     }
+    sem_post(((ROOM_INFO *)roomShmAddr)->sem);
 }
 
 void logout()
 {
     // 유저 ID를 채팅방에서 제거
+    sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
     int index = 0;
     for (int i = 0; i < 3; i++)
     {
@@ -126,6 +154,8 @@ void logout()
         memcpy(((ROOM_INFO *)roomShmAddr)->userIDs + i, ((ROOM_INFO *)roomShmAddr)->userIDs + (i + 1), 20 * sizeof(char));
     }
     ((ROOM_INFO *)roomShmAddr)->userCnt--;
+    sem_post(((ROOM_INFO *)roomShmAddr)->sem);
+    sem_unlink("/sem_key");
 }
 
 
@@ -157,7 +187,7 @@ void chatRead()
                 bool isAllMsg = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, "ALL");
                 bool sendWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].senderID, userID);
                 bool receiveWhisper = !strcmp(((ROOM_INFO *)roomShmAddr)->chats[i].receiverID, userID);
-                
+
                 // 전체 메세지 출력
                 if (isAllMsg)
                 {
@@ -169,7 +199,7 @@ void chatRead()
                         ((ROOM_INFO *)roomShmAddr)->chats[i].senderID,
                         ((ROOM_INFO *)roomShmAddr)->chats[i].message);
                 }
-                
+
                 // 귓속말 출력
                 else if (sendWhisper || receiveWhisper)
                 {
@@ -201,13 +231,19 @@ void chatRead()
             {
                 mvwprintw(
                     UserWnd,
-                    i + 1,
+                    i + 2,
                     1,
                     "%s",
                     ((ROOM_INFO *)roomShmAddr)->userIDs[i]);
             }
         }
-        wrefresh(UserWnd); // 최종출력하고 커서가 userwnd로 이동한다.
+        mvwprintw(
+            UserWnd,
+            1,
+            1,
+            "User cnt: %d",
+            ((ROOM_INFO *)roomShmAddr)->userCnt);
+        wrefresh(UserWnd);
 
         // sleep(0)을 이용하여 쓰레드가 멈추지 않고 다른 우선순위가 같은 write 쓰레드로 전환 보장
         // pthread_mutex_unlock(&mutex);
@@ -299,6 +335,7 @@ void chatWrite()
                 pch = strtok(NULL, " ");
             }
             // 새 귓속말을 공유 메모리에 전달
+            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
@@ -306,10 +343,12 @@ void chatWrite()
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, receiverID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, whisperMsg);
+            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
         }
         else
         {
             // 새 전체 메세지를 공유 메모리에 전달
+            sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
             for (int i = 0; i < MAX_CAPACITY - 1; i++)
             {
                 memcpy(((ROOM_INFO *)roomShmAddr)->chats + i, ((ROOM_INFO *)roomShmAddr)->chats + (i + 1), sizeof(CHAT_INFO));
@@ -317,6 +356,7 @@ void chatWrite()
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].senderID, userID);
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].receiverID, "ALL");
             strcpy(((ROOM_INFO *)roomShmAddr)->chats[MAX_CAPACITY - 1].message, allMsg);
+            sem_post(((ROOM_INFO *)roomShmAddr)->sem);
         }
 
         wclear(InputWnd);
@@ -334,7 +374,7 @@ int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        fprintf(stderr, "[Usage]: ./csechat userID\n");
+        fprintf(stderr, "[Usage]: ./chat userID\n");
         exit(0);
     }
     strcpy(userID, argv[1]);
@@ -343,7 +383,7 @@ int main(int argc, char *argv[])
     // 키 값을 파일로부터 읽어와 공유 메모리 설정
     roomKey = getKey("room_key.txt");
     setShmAddr(roomKey, sizeof(ROOM_INFO), &roomShmAddr);
-    login();
+    // login();
 
     // ncurses의 멀티 쓰레드 환경에서 출력 오류 문제를 해결하기 위해 mutex 사용
     pthread_mutex_init(&mutex, NULL);
@@ -352,7 +392,7 @@ int main(int argc, char *argv[])
     int readErr = pthread_create(&tidRead, NULL, (void *)chatRead, NULL);
     int writeErr = pthread_create(&tidWrite, NULL, (void *)chatWrite, NULL);
 
-    // join을 이용하여 main보다 먼저 종료되지 않도록 보장
+    // join을 이용하여 main이 먼저 종료되지 않도록 보장
     pthread_join(tidRead, NULL);
     pthread_join(tidWrite, NULL);
 
@@ -363,6 +403,7 @@ int main(int argc, char *argv[])
     endwin();
 
     // mutex 해제
-    // pthread_mutex_destroy(&mutex);
+    pthread_mutex_destroy(&mutex);
+    wait(0);
     return 0;
 }
