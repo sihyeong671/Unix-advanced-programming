@@ -43,6 +43,10 @@ char *pch;
 void initWindow()
 {
     initscr();
+    // ctrl 키 인식 위한 코드
+    keypad(stdscr, true);
+    // interupt가 들어오면 처리할 방법을 설정
+    signal(SIGINT, client_handler);
 
     OutputWnd = subwin(stdscr, 12, 42, 0, 0);
     InputWnd = subwin(stdscr, 3, 42, 13, 0);
@@ -108,8 +112,17 @@ void setShmAddr(int key, int size, void **shmAddr)
         pid_t pid = fork();
         if (pid == 0)
         {
-            while (((ROOM_INFO *)roomShmAddr)->userCnt != 0)
-                ;
+            signal(SIGINT, server_handler);
+            // sem = sem_open("/sem_key", 0, 0644);
+            while (true)
+            {
+                if (((ROOM_INFO *)roomShmAddr)->userCnt == 0)
+                {
+                    break;
+                }
+                sleep(0);
+            }
+
             sem_unlink("/sem_key");
 
             shmctl(shmId, IPC_RMID, 0);
@@ -120,10 +133,10 @@ void setShmAddr(int key, int size, void **shmAddr)
 
 void login()
 {
-    // 채팅방에는 3명까지만
-    sem_wait(((ROOM_INFO *)roomShmAddr)->sem);
-    const int currentUserCnt = ((ROOM_INFO *)roomShmAddr)->userCnt;
-    if (currentUserCnt < 3)
+    // 채팅방에는 3명까지만 입장 가능
+    // 공유메모리기 때문에 sem wait사용
+    sem_wait(sem);
+    if (((ROOM_INFO *)roomShmAddr)->userCnt < 3)
     {
         // 유저 ID를 채팅방에 추가
         memcpy(((ROOM_INFO *)roomShmAddr)->userIDs[currentUserCnt], userID, sizeof(userID));
@@ -274,8 +287,8 @@ void chatWrite()
         if (isQuitMsg)
         {
             logout();
-            // pthread_mutex_unlock(&mutex);
-            // quit = true;
+            quit = true;
+            pthread_mutex_unlock(&mutex);
             break;
         }
 
